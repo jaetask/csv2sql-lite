@@ -20,8 +20,10 @@ function CSV2SQL(options) {
   this.tableName = options.tableName || 'undefined';
   this.dbName = options.dbName || false;
   this.dropTable = options.dropTable || false;
+  this.truncateTable = options.truncateTable || false;
   this.seperator = options.seperator || ',';
   this.lineSeperator = options.lineSeperator || '\n';
+  this.columnNameSeparator = options.columnNameSeparator || '`';
 
   //helper functions
   this.insertColumnNames = insertColumnNames;
@@ -42,11 +44,15 @@ CSV2SQL.prototype._transform = function(chunk, enc, cb) {
   var linePush;
 
   if (this.isFirstChunk && this.dbName !== false) {
-    this.push('USE ' + this.dbName + ';\n');
+    this.push(`USE ${this.dbName};\n`);
   }
 
   if (this.isFirstChunk && this.dropTable !== false) {
-    this.push('DROP TABLE IF EXISTS ' + this.tableName + ';\n');
+    this.push(`DROP TABLE IF EXISTS ${this.tableName};\n`);
+  }
+
+  if (this.isFirstChunk && this.truncateTable !== false) {
+    this.push(`TRUNCATE TABLE ${this.tableName};\n`);
   }
 
   if (this.isFirstChunk) {
@@ -54,15 +60,20 @@ CSV2SQL.prototype._transform = function(chunk, enc, cb) {
   }
 
   newLinePos = this.internalBuffer.indexOf(this.lineSeperator);
-
+  let currentLine = 0;
   while (newLinePos !== -1) {
+    if (currentLine > 100000000) {
+      return;
+    }
     line = this.internalBuffer.substring(0, newLinePos);
     this.internalBuffer = this.internalBuffer.substring(newLinePos + 1);
 
     if (this.isFirstRowColumnNames) {
       linePush = this.insertColumnNames(line);
+      currentLine++;
     } else {
       linePush = this.lineToInsert(line);
+      currentLine++;
     }
 
     newLinePos = this.internalBuffer.indexOf(this.lineSeperator);
@@ -88,21 +99,16 @@ module.exports = CSV2SQL;
 /* helper */
 
 function insertColumnNames(line) {
-  var columnNamesArr = line.split(this.seperator);
-  var columnNames = '(';
-  for (var i = 0; i < columnNamesArr.length; i++) {
-    columnNames += columnNamesArr[i] + ',';
-  }
-  //remove trailing comma
-  columnNames = columnNames.substring(0, columnNames.length - 1);
-  columnNames += ')';
-
-  var insert = 'INSERT INTO ' + this.tableName + ' ' + columnNames + ' ' +
-    'VALUES';
+  const colNames = line.split(this.seperator);
+  const colNamesString = [
+    this.columnNameSeparator,
+    colNames.join(`${this.columnNameSeparator},${this.columnNameSeparator}`),
+    this.columnNameSeparator,
+  ].join('');
 
   this.isFirstRowColumnNames = false;
 
-  return insert;
+  return `INSERT INTO ${this.tableName} (${colNamesString}) VALUES`;
 }
 
 /* helper */
@@ -111,6 +117,8 @@ function lineToInsert(line) {
   //TODO: use a csv parser here, or write own
   var dataArr = line.split(this.seperator);
   var row;
+
+  // console.log('dataArr', dataArr);
 
   //insert comma's between VALUES (..), (..), ... , (..)
   if (this.isFirstDataRow) {
@@ -125,11 +133,11 @@ function lineToInsert(line) {
     if (dataArr[i] === '' || dataArr[i] === 'NULL') {
       row += 'NULL';
     } else {
-      //enclose datums in quotes
-      row += '"' + dataArr[i] + '"';
+      //enclose datums in single quotes
+      row += "'" + dataArr[i] + "'";
     }
 
-    //insert comma's between datums
+    // insert comma's between datums (what about numbers)?
     if (i !== dataArr.length - 1) {
       row += ',';
     }
